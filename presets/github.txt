@@ -1,0 +1,36 @@
+# Common GitHub-related hostnames used by git, the website, raw content, and assets.
+# One domain per line. Lines starting with # are ignored.
+
+github.com
+www.github.com
+api.github.com
+gist.github.com
+codeload.github.com
+uploads.github.com
+github.githubassets.com
+central.github.com
+assets-cdn.github.com
+github.global.ssl.fastly.net
+github.map.fastly.net
+githubstatus.com
+github.community
+github.io
+github.blog
+raw.githubusercontent.com
+gist.githubusercontent.com
+camo.githubusercontent.com
+cloud.githubusercontent.com
+desktop.githubusercontent.com
+media.githubusercontent.com
+objects.githubusercontent.com
+user-images.githubusercontent.com
+avatars.githubusercontent.com
+avatars0.githubusercontent.com
+avatars1.githubusercontent.com
+avatars2.githubusercontent.com
+avatars3.githubusercontent.com
+avatars4.githubusercontent.com
+avatars5.githubusercontent.com
+copilot-proxy.githubusercontent.com
+github-cloud.s3.amazonaws.com
+github-com.s3.amazonaws.com
