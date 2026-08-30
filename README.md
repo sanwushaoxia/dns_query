@@ -9,8 +9,35 @@
 1. 同时向 Cloudflare、Google、Quad9、AliDNS、DNSPod、OpenDNS 查询 A / AAAA。
 2. 再用 Cloudflare / Google / AliDNS 的 DNS-over-HTTPS JSON 接口补一轮，减轻本地 DNS 被污染的影响。
 3. 可选：对 IPv4 做 `443` 端口 TCP 握手测速，挑出当前网络下更快的地址。
+4. 公共 DNS 与系统/OS 回退**并行**查询；拿到足够结果后**早停**，避免等全部超时。
+5. 批量域名（如 `--preset github`）**并行**解析，可用 `--workers` 控制并发。
 
-## 安装
+## 性能调优
+
+公共 DNS 被墙或批量写入 hosts 较慢时，优先使用 `--fast`：
+
+```bash
+# 查询：少源、跳过 DoH、首个有效答案即停
+python3 -m src github.com --ipv4-only --fast
+
+# 写入 hosts：34 个 GitHub 域名并行 + 单次 TCP 探测
+./src/apply-hosts.sh apply -y --preset github --fast
+```
+
+| 选项 | 作用 |
+| --- | --- |
+| `--fast` | 仅查 AliDNS + Cloudflare；跳过 DoH；DNS 早停；`apply` 时 `--probes 1` |
+| `--workers N` | 批量域名并行数（默认 `8`） |
+| `--timeout 秒` | 单个公共 DNS 超时（默认 `3`） |
+| `--no-doh` | 跳过 DoH（非 `--fast` 时仍查 6 个 UDP DNS） |
+| `--probes N` | `apply` 时每个 IP 的 TCP :443 探测次数（默认 `3`） |
+
+**建议：**
+
+- 日常刷新 GitHub hosts：`./src/apply-hosts.sh apply -y --preset github --fast`
+- 需要对比多 DNS 源、选最优 CDN：不加 `--fast`，保留默认行为
+- 公共 DNS 全超时：工具会自动并行使用 system DNS / OS resolver（Windows 上通常 2–3 秒内返回）
+
 
 ```bash
 python3 -m venv .venv
@@ -189,7 +216,10 @@ grep github.com /etc/hosts
 | `--from-file 路径` | 从文本文件读域名，一行一个，`#` 开头为注释 |
 | `--dns IP` | 指定 UDP DNS（可重复），例如 `--dns 1.1.1.1 --dns 8.8.8.8` |
 | `--no-doh` | 不做 DNS-over-HTTPS 补充查询 |
+| `--fast` | 快速模式：少源、跳过 DoH、DNS 早停、单次 TCP 探测 |
+| `--workers N` | 批量域名并行数（默认 `8`） |
 | `--timeout 秒` | 单个解析器超时，默认 `3` |
+| `--probes N` | 每个 IP 的 TCP :443 探测次数（默认 `3`，`--fast` 时为 `1`） |
 | `--hosts-file 路径` | 写入目标，默认 `/etc/hosts`，可用来先写到普通文件做试验 |
 | `-y` / `--yes` | `apply` / `remove` / `restore` 时跳过确认 |
 

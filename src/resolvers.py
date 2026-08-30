@@ -29,6 +29,11 @@ DEFAULT_DNS_RESOLVERS: tuple[DnsResolver, ...] = (
     DnsResolver("OpenDNS", "208.67.222.222"),
 )
 
+FAST_DNS_RESOLVERS: tuple[DnsResolver, ...] = (
+    DnsResolver("AliDNS", "223.5.5.5"),
+    DnsResolver("Cloudflare", "1.1.1.1"),
+)
+
 DEFAULT_DOH_RESOLVERS: tuple[DohResolver, ...] = (
     DohResolver("Cloudflare DoH", "https://cloudflare-dns.com/dns-query"),
     DohResolver("Google DoH", "https://dns.google/resolve"),
@@ -36,11 +41,13 @@ DEFAULT_DOH_RESOLVERS: tuple[DohResolver, ...] = (
 )
 
 
-def get_dns_resolvers(addresses: list[str] | None) -> list[DnsResolver]:
-    if not addresses:
-        return list(DEFAULT_DNS_RESOLVERS)
-    named = {item.address: item.name for item in DEFAULT_DNS_RESOLVERS}
-    return [
-        DnsResolver(name=named.get(address, address), address=address)
-        for address in addresses
-    ]
+def get_dns_resolvers(addresses: list[str] | None, *, fast: bool = False) -> list[DnsResolver]:
+    if addresses:
+        named = {item.address: item.name for item in DEFAULT_DNS_RESOLVERS}
+        return [
+            DnsResolver(name=named.get(address, address), address=address)
+            for address in addresses
+        ]
+    if fast:
+        return list(FAST_DNS_RESOLVERS)
+    return list(DEFAULT_DNS_RESOLVERS)

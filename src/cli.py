@@ -6,9 +6,9 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .lookup import LookupResult, query_domain
+from .lookup import LookupResult, query_domains
 from .presets import list_presets, load_domain_file, load_preset
-from .speed import measure_tcp_latency, pick_fastest_ipv4
+from .speed import measure_tcp_latency, pick_best_ipv4, pick_fastest_ipv4
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -36,6 +36,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-doh", action="store_true", help="Skip DNS-over-HTTPS fallback")
     parser.add_argument("--ipv4-only", action="store_true", help="Query A records only")
     parser.add_argument("--timeout", type=float, default=3.0, help="Per-resolver timeout in seconds")
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=8,
+        metavar="N",
+        help="Parallel domain queries when resolving many names (default: 8)",
+    )
+    parser.add_argument(
+        "--fast",
+        action="store_true",
+        help="Fast mode: fewer resolvers, skip DoH, stop after first useful answer",
+    )
     parser.add_argument(
         "--fastest",
         action="store_true",
@@ -75,9 +87,10 @@ def collect_domains(args: argparse.Namespace) -> list[str]:
     return domains
 
 
-def choose_ip(result: LookupResult, fastest: bool) -> str | None:
+def choose_ip(result: LookupResult, fastest: bool, probes: int = 3) -> str | None:
     if fastest:
-        return pick_fastest_ipv4(result.ipv4)
+        pick = pick_best_ipv4(result.ipv4, probes=probes)
+        return pick.ip if pick else None
     if result.ipv4:
         return result.ipv4[0]
     if result.ipv6:
@@ -182,16 +195,15 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     record_types = ("A",) if args.ipv4_only else ("A", "AAAA")
-    results = [
-        query_domain(
-            domain,
-            dns_servers=args.dns_servers,
-            use_doh=not args.no_doh,
-            record_types=record_types,
-            timeout=args.timeout,
-        )
-        for domain in domains
-    ]
+    results = query_domains(
+        domains,
+        dns_servers=args.dns_servers,
+        use_doh=not args.no_doh,
+        record_types=record_types,
+        timeout=args.timeout,
+        domain_workers=max(1, args.workers),
+        fast=args.fast,
+    )
 
     if args.format == "hosts":
         text = render_hosts(results, fastest=args.fastest)

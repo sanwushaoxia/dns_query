@@ -3,22 +3,43 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
 BEGIN_MARK = "# BEGIN dns-query managed"
 END_MARK = "# END dns-query managed"
-DEFAULT_HOSTS = Path("/etc/hosts")
 BACKUP_SUFFIX = ".dns-query.bak"
 ORIG_SUFFIX = ".dns-query.orig"
 
 
+def default_hosts_path() -> Path:
+    if sys.platform == "win32":
+        system_root = os.environ.get("SystemRoot", r"C:\Windows")
+        return Path(system_root) / "System32" / "drivers" / "etc" / "hosts"
+    return Path("/etc/hosts")
+
+
+DEFAULT_HOSTS = default_hosts_path()
+
+
+def backup_store_dir(hosts_path: Path) -> Path:
+    """Directory for hosts backups. On Windows, avoid writing beside hosts in System32."""
+    if sys.platform == "win32":
+        base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+        store = Path(base) / "dns-query" / "hosts-backups"
+        store.mkdir(parents=True, exist_ok=True)
+        return store
+    return hosts_path.parent
+
+
 def backup_path(hosts_path: Path) -> Path:
-    return hosts_path.with_name(hosts_path.name + BACKUP_SUFFIX)
+    return backup_store_dir(hosts_path) / (hosts_path.name + BACKUP_SUFFIX)
 
 
 def orig_path(hosts_path: Path) -> Path:
-    return hosts_path.with_name(hosts_path.name + ORIG_SUFFIX)
+    return backup_store_dir(hosts_path) / (hosts_path.name + ORIG_SUFFIX)
 
 
 def _can_write(path: Path) -> bool:
@@ -28,19 +49,34 @@ def _can_write(path: Path) -> bool:
     return os.access(parent, os.W_OK)
 
 
+def _need_elevation_hint() -> str:
+    if sys.platform == "win32":
+        return "run as Administrator"
+    return "need sudo"
+
+
 def privileged_copy(src: Path, dst: Path) -> None:
     if _can_write(dst):
         shutil.copy2(src, dst)
         return
+    if sys.platform == "win32":
+        raise PermissionError(f"cannot copy {src} -> {dst} ({_need_elevation_hint()})")
     completed = subprocess.run(["sudo", "cp", "-a", str(src), str(dst)], check=False)
     if completed.returncode != 0:
-        raise PermissionError(f"cannot copy {src} -> {dst} (need sudo)")
+        raise PermissionError(f"cannot copy {src} -> {dst} ({_need_elevation_hint()})")
 
 
 def privileged_write(path: Path, content: str) -> None:
     if _can_write(path):
-        path.write_text(content, encoding="utf-8")
+        path.write_text(content, encoding="utf-8", newline="\n")
         return
+    if sys.platform == "win32" and _windows_write_hosts(path, content):
+        return
+    if sys.platform == "win32":
+        raise PermissionError(
+            f"cannot write {path} ({_need_elevation_hint()}). "
+            "On Windows, open PowerShell or CMD as Administrator, not only Git Bash."
+        )
     completed = subprocess.run(
         ["sudo", "tee", str(path)],
         input=content.encode("utf-8"),
@@ -48,13 +84,35 @@ def privileged_write(path: Path, content: str) -> None:
         check=False,
     )
     if completed.returncode != 0:
-        raise PermissionError(f"cannot write {path} (need sudo)")
+        raise PermissionError(f"cannot write {path} ({_need_elevation_hint()})")
+
+
+def _windows_write_hosts(path: Path, content: str) -> bool:
+    """Write hosts via PowerShell when the current process lacks direct access."""
+    tmp = Path(tempfile.gettempdir()) / f"dns-query-hosts-{os.getpid()}.tmp"
+    try:
+        tmp.write_text(content, encoding="utf-8", newline="\n")
+        ps = (
+            f"$src = '{tmp}'; $dst = '{path}'; "
+            f"Copy-Item -LiteralPath $src -Destination $dst -Force"
+        )
+        completed = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", ps],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        return completed.returncode == 0
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 def privileged_read(path: Path) -> str:
     try:
         return path.read_text(encoding="utf-8")
     except PermissionError:
+        if sys.platform == "win32":
+            raise PermissionError(f"cannot read {path} ({_need_elevation_hint()})") from None
         completed = subprocess.run(
             ["sudo", "cat", str(path)],
             check=False,
@@ -187,6 +245,20 @@ def restore_hosts(hosts_path: Path) -> Path:
 
 
 def flush_dns_cache() -> str | None:
+    if sys.platform == "win32":
+        try:
+            completed = subprocess.run(
+                ["ipconfig", "/flushdns"],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+        except FileNotFoundError:
+            return None
+        if completed.returncode == 0:
+            return "ipconfig /flushdns"
+        return None
+
     candidates = (
         ["resolvectl", "flush-caches"],
         ["systemd-resolve", "--flush-caches"],

@@ -3,6 +3,7 @@
 
 github.com
 www.github.com
+ssh.github.com
 api.github.com
 gist.github.com
 codeload.github.com
